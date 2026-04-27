@@ -1,0 +1,16 @@
+{
+  "name": "worker-manager-sample-test-repo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Playwright repo compatible with worker-manager script generation and execution",
+  "scripts": {
+    "test": "playwright test --reporter=list,html",
+    "test:headed": "playwright test --headed --reporter=list,html",
+    "test:smoke": "playwright test --grep @smoke --reporter=list,html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "dotenv": "^16.6.1",
+    "typescript": "^5.9.3"
+  }
+}
