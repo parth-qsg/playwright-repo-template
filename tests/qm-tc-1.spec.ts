@@ -98,8 +98,14 @@ class AppShell {
       if (tagName === 'select') {
         await combo.selectOption({ label: clientName });
       } else {
-        await this.page.getByRole('option', { name: optionName }).click();
+        // Some custom comboboxes render options in a listbox; ensure it's open before clicking.
+        const listbox = this.page.getByRole('listbox');
+        await expect(listbox).toBeVisible({ timeout: 10_000 });
+        await listbox.getByRole('option', { name: optionName }).click();
       }
+
+      // Wait for the selection to be reflected in the UI.
+      await expect(combo).toContainText(optionName, { timeout: 15_000 });
       return;
     }
 
@@ -116,6 +122,22 @@ class AppShell {
     const menuItem = this.page.getByRole('menuitem', { name: optionName });
     if (await menuItem.isVisible().catch(() => false)) {
       await menuItem.click();
+      await expect(switcher).toContainText(optionName, { timeout: 15_000 });
+      return;
+    }
+
+    // Option might be inside a listbox (custom select) or be a native <option> (not visible).
+    const listbox = this.page.getByRole('listbox');
+    if (await listbox.isVisible().catch(() => false)) {
+      await listbox.getByRole('option', { name: optionName }).click();
+      await expect(switcher).toContainText(optionName, { timeout: 15_000 });
+      return;
+    }
+
+    // Fallback: if a native <select> exists somewhere, select by label.
+    const nativeSelect = this.page.locator('select').first();
+    if (await nativeSelect.isVisible().catch(() => false)) {
+      await nativeSelect.selectOption({ label: clientName });
       return;
     }
 
