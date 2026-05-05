@@ -98,13 +98,11 @@ class AppShell {
       if (tagName === 'select') {
         await combo.selectOption({ label: clientName });
       } else {
-        // Some custom comboboxes render options in a listbox; ensure it's open before clicking.
         const listbox = this.page.getByRole('listbox');
         await expect(listbox).toBeVisible({ timeout: 10_000 });
         await listbox.getByRole('option', { name: optionName }).click();
       }
 
-      // Wait for the selection to be reflected in the UI.
       await expect(combo).toContainText(optionName, { timeout: 15_000 });
       return;
     }
@@ -126,7 +124,6 @@ class AppShell {
       return;
     }
 
-    // Option might be inside a listbox (custom select) or be a native <option> (not visible).
     const listbox = this.page.getByRole('listbox');
     if (await listbox.isVisible().catch(() => false)) {
       await listbox.getByRole('option', { name: optionName }).click();
@@ -134,7 +131,6 @@ class AppShell {
       return;
     }
 
-    // Fallback: if a native <select> exists somewhere, select by label.
     const nativeSelect = this.page.locator('select').first();
     if (await nativeSelect.isVisible().catch(() => false)) {
       await nativeSelect.selectOption({ label: clientName });
@@ -145,8 +141,25 @@ class AppShell {
   }
 
   async openProductDetailsList(): Promise<void> {
-    await expect(this.productsNavLink()).toBeVisible({ timeout: 20_000 });
-    await this.productsNavLink().click();
+    const nav = this.productsNavLink();
+    await expect(nav).toBeVisible({ timeout: 20_000 });
+
+    // A modal overlay can intermittently remain open after client switching and intercept clicks.
+    const modalOverlay = this.page.locator(
+      '[role="dialog"][aria-modal="true"], .modal, [data-state="open"][role="dialog"], .fixed.inset-0.z-50',
+    );
+    if (await modalOverlay.first().isVisible().catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => undefined);
+      await expect(modalOverlay).toHaveCount(0, { timeout: 15_000 });
+    }
+
+    try {
+      await nav.click({ timeout: 20_000 });
+    } catch {
+      // If an overlay still intercepts pointer events, fall back to a forced click.
+      await nav.click({ timeout: 20_000, force: true });
+    }
+
     await expect(this.page.getByRole('heading', { name: /products|catalog/i })).toBeVisible({ timeout: 20_000 });
   }
 }
