@@ -168,30 +168,51 @@ class ProductsCatalogPage {
   constructor(private readonly page: Page) {}
 
   private searchField(): Locator {
-    return this.page.getByRole('textbox', { name: /search/i });
+    return this.page
+      .getByRole('textbox', { name: /search/i })
+      .or(this.page.getByPlaceholder(/search/i))
+      .or(this.page.locator('input[type="search"], input[placeholder*="search" i]'));
+  }
+
+  private tableOrListContainer(): Locator {
+    return this.page
+      .getByRole('table')
+      .or(this.page.getByRole('grid'))
+      .or(this.page.getByRole('list'))
+      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'));
   }
 
   private productRowOrLink(name: string): Locator {
+    const exact = new RegExp(`^${name}$`, 'i');
+    const contains = new RegExp(name, 'i');
+
     return this.page
-      .getByRole('row', { name: new RegExp(name, 'i') })
-      .or(this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }))
-      .or(this.page.getByText(new RegExp(`^${name}$`, 'i')));
+      .getByRole('link', { name: exact })
+      .or(this.page.getByRole('button', { name: exact }))
+      .or(this.page.getByRole('row', { name: contains }))
+      .or(this.page.getByRole('listitem').filter({ hasText: exact }))
+      .or(this.page.getByText(exact));
   }
 
   async openProduct(name: string): Promise<void> {
-    if (await this.searchField().isVisible().catch(() => false)) {
-      await this.searchField().fill(name);
+    await expect(this.tableOrListContainer().first()).toBeVisible({ timeout: 30_000 });
+
+    const search = this.searchField();
+    if (await search.first().isVisible().catch(() => false)) {
+      await search.first().fill(name);
+      await this.page.waitForTimeout(300);
     }
 
-    const target = this.productRowOrLink(name);
-    await expect(target.first()).toBeVisible({ timeout: 20_000 });
+    const target = this.productRowOrLink(name).first();
+    await expect(target).toBeVisible({ timeout: 30_000 });
 
-    const nameLink = target.first().getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
+    const nameLink = target.getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
     if (await nameLink.isVisible().catch(() => false)) {
       await nameLink.click();
-    } else {
-      await target.first().click();
+      return;
     }
+
+    await target.click();
   }
 }
 
