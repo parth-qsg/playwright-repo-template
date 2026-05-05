@@ -1,0 +1,192 @@
+import { test, expect, type Locator, type Page } from '@playwright/test';
+
+class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  private usernameField(): Locator {
+    return this.page
+      .getByLabel(/user(name)?|email/i)
+      .or(this.page.getByRole('textbox', { name: /user(name)?|email/i }))
+      .or(
+        this.page.locator(
+          'input[name*="user" i], input[name*="email" i], input[type="email"], input[autocomplete="username"]',
+        ),
+      );
+  }
+
+  private passwordField(): Locator {
+    return this.page
+      .getByLabel(/password/i)
+      .or(this.page.getByRole('textbox', { name: /password/i }))
+      .or(this.page.locator('input[type="password"], input[name*="pass" i], input[autocomplete="current-password"]'));
+  }
+
+  private signInButton(): Locator {
+    return this.page
+      .getByRole('button', { name: /sign in|log in|login/i })
+      .or(this.page.getByRole('button', { name: /continue|next/i }))
+      .or(this.page.locator('button[type="submit"], input[type="submit"]'));
+  }
+
+  async goto(): Promise<void> {
+    const baseURL = test.info().project.use?.baseURL;
+    if (!baseURL) throw new Error('baseURL is not configured in Playwright project config.');
+    await this.page.goto(baseURL, { waitUntil: 'domcontentloaded' });
+    await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  async login(username: string, password: string): Promise<void> {
+    await this.usernameField().first().fill(username);
+
+    // Support both single-step and two-step login forms.
+    if (await this.passwordField().first().isVisible().catch(() => false)) {
+      await this.passwordField().first().fill(password);
+      await this.signInButton().first().click();
+      return;
+    }
+
+    await this.signInButton().first().click();
+    await expect(this.passwordField().first()).toBeVisible({ timeout: 20_000 });
+    await this.passwordField().first().fill(password);
+    await this.signInButton().first().click();
+  }
+}
+
+class AppShell {
+  constructor(private readonly page: Page) {}
+
+  private clientSwitcherCombobox(): Locator {
+    return this.page.getByRole('combobox', { name: /client|context|tenant|account/i });
+  }
+
+  private clientSwitcherButton(): Locator {
+    return this.page.getByRole('button', { name: /client|context|tenant|account/i });
+  }
+
+  private productsNavLink(): Locator {
+    return this.page.getByRole('link', { name: /products|catalog/i });
+  }
+
+  async selectClient(clientName: string): Promise<void> {
+    const optionName = new RegExp(`^${clientName}$`, 'i');
+
+    // If a modal/dialog overlay is present (e.g., post-login prompt), dismiss it first.
+    // Failure evidence: a role=dialog overlay was intercepting pointer events.
+    const dialog = this.page.getByRole('dialog').first();
+    if (await dialog.isVisible().catch(() => false)) {
+      const close = dialog
+        .getByRole('button', { name: /close|dismiss|cancel|not now|skip/i })
+        .or(dialog.locator('[aria-label*="close" i]'));
+      if (await close.first().isVisible().catch(() => false)) {
+        await close.first().click();
+      } else {
+        // Some dialogs close on Escape.
+        await this.page.keyboard.press('Escape').catch(() => undefined);
+      }
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+    }
+
+    // Also wait for any remaining modal backdrops to disappear.
+    await expect(
+      this.page.locator('[role="dialog"][aria-modal="true"], .modal, [data-state="open"][role="dialog"]'),
+    ).toHaveCount(0, { timeout: 15_000 });
+
+    if (await this.clientSwitcherCombobox().isVisible().catch(() => false)) {
+      await this.clientSwitcherCombobox().click();
+      await this.page.getByRole('option', { name: optionName }).click();
+      return;
+    }
+
+    const switcher = this.page
+      .getByRole('button', { name: /open client prompts drawer/i })
+      .or(this.clientSwitcherButton());
+
+    // If something still intercepts pointer events, fall back to a forced click.
+    try {
+      await switcher.click({ timeout: 20_000 });
+    } catch {
+      await switcher.click({ timeout: 20_000, force: true });
+    }
+
+    const menuItem = this.page.getByRole('menuitem', { name: optionName });
+    if (await menuItem.isVisible().catch(() => false)) {
+      await menuItem.click();
+      return;
+    }
+
+    await this.page.getByRole('option', { name: optionName }).click();
+  }
+
+  async openProductDetailsList(): Promise<void> {
+    await expect(this.productsNavLink()).toBeVisible({ timeout: 20_000 });
+    await this.productsNavLink().click();
+    await expect(this.page.getByRole('heading', { name: /products|catalog/i })).toBeVisible({ timeout: 20_000 });
+  }
+}
+
+class ProductsCatalogPage {
+  constructor(private readonly page: Page) {}
+
+  private searchField(): Locator {
+    return this.page.getByRole('textbox', { name: /search/i });
+  }
+
+  private productRowOrLink(name: string): Locator {
+    return this.page
+      .getByRole('row', { name: new RegExp(name, 'i') })
+      .or(this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }))
+      .or(this.page.getByText(new RegExp(`^${name}$`, 'i')));
+  }
+
+  async openProduct(name: string): Promise<void> {
+    if (await this.searchField().isVisible().catch(() => false)) {
+      await this.searchField().fill(name);
+    }
+
+    const target = this.productRowOrLink(name);
+    await expect(target.first()).toBeVisible({ timeout: 20_000 });
+
+    const nameLink = target.first().getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
+    if (await nameLink.isVisible().catch(() => false)) {
+      await nameLink.click();
+    } else {
+      await target.first().click();
+    }
+  }
+}
+
+class ProductDetailsPage {
+  constructor(private readonly page: Page) {}
+
+  async assertLoadedWithName(name: string): Promise<void> {
+    await expect(this.page.getByRole('heading', { name: new RegExp(`^${name}$`, 'i') })).toBeVisible({ timeout: 20_000 });
+    await expect(this.page.locator('body')).toContainText(new RegExp(name, 'i'));
+  }
+}
+
+test.describe('QM-TC-1 Open Test Product details after selecting client TEST', { tag: '@new' }, () => {
+  test('Open Test Product details and verify product name', async ({ page }) => {
+    // Arrange
+    const username = process.env.TEST_USERNAME ?? process.env.APP_USERNAME;
+    const password = process.env.TEST_PASSWORD ?? process.env.APP_PASSWORD;
+    if (!username || !password) {
+      throw new Error('Missing credentials. Set TEST_USERNAME/TEST_PASSWORD (or APP_USERNAME/APP_PASSWORD).');
+    }
+
+    const loginPage = new LoginPage(page);
+    const shell = new AppShell(page);
+    const catalog = new ProductsCatalogPage(page);
+    const details = new ProductDetailsPage(page);
+
+    // Act
+    await loginPage.goto();
+    await loginPage.login(username, password);
+
+    await shell.selectClient('TEST');
+    await shell.openProductDetailsList();
+    await catalog.openProduct('Test Product');
+
+    // Assert
+    await details.assertLoadedWithName('Test Product');
+  });
+});
