@@ -179,7 +179,8 @@ class ProductsCatalogPage {
       .getByRole('table')
       .or(this.page.getByRole('grid'))
       .or(this.page.getByRole('list'))
-      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'));
+      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'))
+      .or(this.page.locator('main'));
   }
 
   private productRowOrLink(name: string): Locator {
@@ -195,12 +196,22 @@ class ProductsCatalogPage {
   }
 
   async openProduct(name: string): Promise<void> {
-    await expect(this.tableOrListContainer().first()).toBeVisible({ timeout: 30_000 });
+    // Some apps render the catalog as cards without table/grid/list roles.
+    // Wait for the page to be ready by waiting for either a container or the product itself.
+    await expect
+      .poll(
+        async () => {
+          const containerCount = await this.tableOrListContainer().count();
+          const productCount = await this.productRowOrLink(name).count();
+          return containerCount > 0 || productCount > 0;
+        },
+        { timeout: 30_000 },
+      )
+      .toBeTruthy();
 
     const search = this.searchField();
     if (await search.first().isVisible().catch(() => false)) {
       await search.first().fill(name);
-      await this.page.waitForTimeout(300);
     }
 
     const target = this.productRowOrLink(name).first();
