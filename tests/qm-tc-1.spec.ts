@@ -71,7 +71,6 @@ class AppShell {
     const optionName = new RegExp(`^${clientName}$`, 'i');
 
     // If a modal/dialog overlay is present (e.g., post-login prompt), dismiss it first.
-    // Failure evidence: a role=dialog overlay was intercepting pointer events.
     const dialog = this.page.getByRole('dialog').first();
     if (await dialog.isVisible().catch(() => false)) {
       const close = dialog
@@ -80,20 +79,27 @@ class AppShell {
       if (await close.first().isVisible().catch(() => false)) {
         await close.first().click();
       } else {
-        // Some dialogs close on Escape.
         await this.page.keyboard.press('Escape').catch(() => undefined);
       }
       await expect(dialog).toBeHidden({ timeout: 15_000 });
     }
 
-    // Also wait for any remaining modal backdrops to disappear.
     await expect(
       this.page.locator('[role="dialog"][aria-modal="true"], .modal, [data-state="open"][role="dialog"]'),
     ).toHaveCount(0, { timeout: 15_000 });
 
     if (await this.clientSwitcherCombobox().isVisible().catch(() => false)) {
-      await this.clientSwitcherCombobox().click();
-      await this.page.getByRole('option', { name: optionName }).click();
+      const combo = this.clientSwitcherCombobox();
+      await combo.click();
+
+      // Native <select> renders <option> elements that are not "visible" to Playwright.
+      // Prefer selectOption when the combobox is a <select>.
+      const tagName = await combo.evaluate((el) => el.tagName.toLowerCase());
+      if (tagName === 'select') {
+        await combo.selectOption({ label: clientName });
+      } else {
+        await this.page.getByRole('option', { name: optionName }).click();
+      }
       return;
     }
 
@@ -101,7 +107,6 @@ class AppShell {
       .getByRole('button', { name: /open client prompts drawer/i })
       .or(this.clientSwitcherButton());
 
-    // If something still intercepts pointer events, fall back to a forced click.
     try {
       await switcher.click({ timeout: 20_000 });
     } catch {
