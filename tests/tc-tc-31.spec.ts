@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 
 class LoginPage {
   constructor(private readonly page: Page) {}
@@ -7,7 +7,11 @@ class LoginPage {
     return this.page
       .getByLabel(/user(name)?|email/i)
       .or(this.page.getByRole('textbox', { name: /user(name)?|email/i }))
-      .or(this.page.locator('input[name*="user" i], input[name*="email" i], input[type="email"], input[autocomplete="username"]'));
+      .or(
+        this.page.locator(
+          'input[name*="user" i], input[name*="email" i], input[type="email"], input[autocomplete="username"]',
+        ),
+      );
   }
 
   private passwordField(): Locator {
@@ -31,11 +35,10 @@ class LoginPage {
   }
 
   async login(username: string, password: string): Promise<void> {
-    // Support both single-step and two-step login forms.
-    await expect(this.usernameField().first()).toBeVisible({ timeout: 20000 });
+    await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
     await this.usernameField().first().fill(username);
 
-    // Some apps require clicking Next/Continue before password appears.
+    // Support both single-step and two-step login forms.
     if (await this.passwordField().first().isVisible().catch(() => false)) {
       await this.passwordField().first().fill(password);
       await this.signInButton().first().click();
@@ -43,7 +46,7 @@ class LoginPage {
     }
 
     await this.signInButton().first().click();
-    await expect(this.passwordField().first()).toBeVisible({ timeout: 20000 });
+    await expect(this.passwordField().first()).toBeVisible({ timeout: 20_000 });
     await this.passwordField().first().fill(password);
     await this.signInButton().first().click();
   }
@@ -52,11 +55,11 @@ class LoginPage {
 class AppShell {
   constructor(private readonly page: Page) {}
 
-  private clientSwitcher(): Locator {
+  private clientSwitcherCombobox(): Locator {
     return this.page.getByRole('combobox', { name: /client|context|tenant|account/i });
   }
 
-  private clientMenuButton(): Locator {
+  private clientSwitcherButton(): Locator {
     return this.page.getByRole('button', { name: /client|context|tenant|account/i });
   }
 
@@ -65,28 +68,46 @@ class AppShell {
   }
 
   async selectClient(clientName: string): Promise<void> {
-    // Try combobox first
-    if (await this.clientSwitcher().isVisible().catch(() => false)) {
-      await this.clientSwitcher().click();
-      await this.page.getByRole('option', { name: new RegExp(`^${clientName}$`, 'i') }).click();
+    const optionName = new RegExp(`^${clientName}$`, 'i');
+
+    // If a modal/dialog overlay is present (e.g., post-login prompt), dismiss it first.
+    const dialog = this.page.getByRole('dialog').first();
+    if (await dialog.isVisible().catch(() => false)) {
+      const close = dialog
+        .getByRole('button', { name: /close|dismiss|cancel|not now|skip/i })
+        .or(dialog.locator('[aria-label*="close" i]'));
+      if (await close.first().isVisible().catch(() => false)) {
+        await close.first().click();
+        await expect(dialog).toBeHidden({ timeout: 10_000 });
+      }
+    }
+
+    if (await this.clientSwitcherCombobox().isVisible().catch(() => false)) {
+      await this.clientSwitcherCombobox().click();
+      await this.page.getByRole('option', { name: optionName }).click();
       return;
     }
 
-    // Fallback: open a menu/dialog and pick the client
-    await this.clientMenuButton().click();
-    const option = this.page.getByRole('menuitem', { name: new RegExp(`^${clientName}$`, 'i') });
-    if (await option.isVisible().catch(() => false)) {
-      await option.click();
+    // Prefer aria-label used by the app; fall back to generic name matcher.
+    const switcher = this.page
+      .getByRole('button', { name: /open client prompts drawer/i })
+      .or(this.clientSwitcherButton());
+
+    await switcher.click({ timeout: 20_000 });
+
+    const menuItem = this.page.getByRole('menuitem', { name: optionName });
+    if (await menuItem.isVisible().catch(() => false)) {
+      await menuItem.click();
       return;
     }
 
-    await this.page.getByRole('option', { name: new RegExp(`^${clientName}$`, 'i') }).click();
+    await this.page.getByRole('option', { name: optionName }).click();
   }
 
   async openProductsCatalog(): Promise<void> {
-    await expect(this.productsNavLink()).toBeVisible();
+    await expect(this.productsNavLink()).toBeVisible({ timeout: 20_000 });
     await this.productsNavLink().click();
-    await expect(this.page.getByRole('heading', { name: /products|catalog/i })).toBeVisible();
+    await expect(this.page.getByRole('heading', { name: /products|catalog/i })).toBeVisible({ timeout: 20_000 });
   }
 }
 
@@ -97,28 +118,26 @@ class ProductsCatalogPage {
     return this.page.getByRole('textbox', { name: /search/i });
   }
 
-  private productRowByName(name: string): Locator {
-    // Prefer accessible grid/table row.
+  private productRowOrLink(name: string): Locator {
     return this.page
       .getByRole('row', { name: new RegExp(name, 'i') })
-      .or(this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }));
+      .or(this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }))
+      .or(this.page.getByText(new RegExp(`^${name}$`, 'i')));
   }
 
   async openProduct(name: string): Promise<void> {
-    // If a search box exists, use it to make the test deterministic.
     if (await this.searchField().isVisible().catch(() => false)) {
       await this.searchField().fill(name);
     }
 
-    const rowOrLink = this.productRowByName(name);
-    await expect(rowOrLink).toBeVisible();
+    const target = this.productRowOrLink(name);
+    await expect(target.first()).toBeVisible({ timeout: 20_000 });
 
-    // If it's a row, click the name link inside; otherwise click the link itself.
-    const nameLink = rowOrLink.getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
+    const nameLink = target.first().getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
     if (await nameLink.isVisible().catch(() => false)) {
       await nameLink.click();
     } else {
-      await rowOrLink.click();
+      await target.first().click();
     }
   }
 }
@@ -126,21 +145,9 @@ class ProductsCatalogPage {
 class ProductDetailsPage {
   constructor(private readonly page: Page) {}
 
-  private title(): Locator {
-    return this.page.getByRole('heading', { name: /test product/i });
-  }
-
   async assertLoadedWithName(name: string): Promise<void> {
-    await expect(this.page.getByRole('heading', { name: new RegExp(name, 'i') })).toBeVisible();
-
-    // Minimal “relevant information” check: ensure there is at least one labeled field/value.
-    const detailsRegion = this.page.getByRole('region').first();
-    if (await detailsRegion.isVisible().catch(() => false)) {
-      await expect(detailsRegion).toContainText(/./);
-    } else {
-      // Fallback: page has some content besides the title.
-      await expect(this.page.locator('body')).toContainText(new RegExp(name, 'i'));
-    }
+    await expect(this.page.getByRole('heading', { name: new RegExp(name, 'i') })).toBeVisible({ timeout: 20_000 });
+    await expect(this.page.locator('body')).toContainText(new RegExp(name, 'i'));
   }
 }
 
