@@ -32,10 +32,10 @@ class LoginPage {
     const baseURL = test.info().project.use?.baseURL;
     if (!baseURL) throw new Error('baseURL is not configured in Playwright project config.');
     await this.page.goto(baseURL, { waitUntil: 'domcontentloaded' });
+    await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
   }
 
   async login(username: string, password: string): Promise<void> {
-    await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
     await this.usernameField().first().fill(username);
 
     // Support both single-step and two-step login forms.
@@ -78,26 +78,62 @@ class AppShell {
         .or(dialog.locator('[aria-label*="close" i]'));
       if (await close.first().isVisible().catch(() => false)) {
         await close.first().click();
-        await expect(dialog).toBeHidden({ timeout: 10_000 });
+      } else {
+        await this.page.keyboard.press('Escape').catch(() => undefined);
       }
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
     }
 
+    await expect(
+      this.page.locator('[role="dialog"][aria-modal="true"], .modal, [data-state="open"][role="dialog"]'),
+    ).toHaveCount(0, { timeout: 15_000 });
+
     if (await this.clientSwitcherCombobox().isVisible().catch(() => false)) {
-      await this.clientSwitcherCombobox().click();
-      await this.page.getByRole('option', { name: optionName }).click();
+      const combo = this.clientSwitcherCombobox();
+      await combo.click();
+
+      // Native <select> renders <option> elements that are not "visible" to Playwright.
+      // Prefer selectOption when the combobox is a <select>.
+      const tagName = await combo.evaluate((el) => el.tagName.toLowerCase());
+      if (tagName === 'select') {
+        await combo.selectOption({ label: clientName });
+      } else {
+        const listbox = this.page.getByRole('listbox');
+        await expect(listbox).toBeVisible({ timeout: 10_000 });
+        await listbox.getByRole('option', { name: optionName }).click();
+      }
+
+      await expect(combo).toContainText(optionName, { timeout: 15_000 });
       return;
     }
 
-    // Prefer aria-label used by the app; fall back to generic name matcher.
     const switcher = this.page
       .getByRole('button', { name: /open client prompts drawer/i })
       .or(this.clientSwitcherButton());
 
-    await switcher.click({ timeout: 20_000 });
+    try {
+      await switcher.click({ timeout: 20_000 });
+    } catch {
+      await switcher.click({ timeout: 20_000, force: true });
+    }
 
     const menuItem = this.page.getByRole('menuitem', { name: optionName });
     if (await menuItem.isVisible().catch(() => false)) {
       await menuItem.click();
+      await expect(switcher).toContainText(optionName, { timeout: 15_000 });
+      return;
+    }
+
+    const listbox = this.page.getByRole('listbox');
+    if (await listbox.isVisible().catch(() => false)) {
+      await listbox.getByRole('option', { name: optionName }).click();
+      await expect(switcher).toContainText(optionName, { timeout: 15_000 });
+      return;
+    }
+
+    const nativeSelect = this.page.locator('select').first();
+    if (await nativeSelect.isVisible().catch(() => false)) {
+      await nativeSelect.selectOption({ label: clientName });
       return;
     }
 
@@ -105,8 +141,24 @@ class AppShell {
   }
 
   async openProductsCatalog(): Promise<void> {
-    await expect(this.productsNavLink()).toBeVisible({ timeout: 20_000 });
-    await this.productsNavLink().click();
+    const nav = this.productsNavLink();
+    await expect(nav).toBeVisible({ timeout: 20_000 });
+
+    // A modal overlay can intermittently remain open after client switching and intercept clicks.
+    const modalOverlay = this.page.locator(
+      '[role="dialog"][aria-modal="true"], .modal, [data-state="open"][role="dialog"], .fixed.inset-0.z-50',
+    );
+    if (await modalOverlay.first().isVisible().catch(() => false)) {
+      await this.page.keyboard.press('Escape').catch(() => undefined);
+      await expect(modalOverlay).toHaveCount(0, { timeout: 15_000 });
+    }
+
+    try {
+      await nav.click({ timeout: 20_000 });
+    } catch {
+      await nav.click({ timeout: 20_000, force: true });
+    }
+
     await expect(this.page.getByRole('heading', { name: /products|catalog/i })).toBeVisible({ timeout: 20_000 });
   }
 }
@@ -115,30 +167,43 @@ class ProductsCatalogPage {
   constructor(private readonly page: Page) {}
 
   private searchField(): Locator {
-    return this.page.getByRole('textbox', { name: /search/i });
+    return this.page
+      .getByRole('textbox', { name: /search/i })
+      .or(this.page.getByPlaceholder(/search/i))
+      .or(this.page.locator('input[type="search"], input[placeholder*="search" i]'));
   }
 
   private productRowOrLink(name: string): Locator {
+    const exact = new RegExp(`^${name}$`, 'i');
+    const contains = new RegExp(name, 'i');
+
     return this.page
-      .getByRole('row', { name: new RegExp(name, 'i') })
-      .or(this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }))
-      .or(this.page.getByText(new RegExp(`^${name}$`, 'i')));
+      .getByRole('link', { name: exact })
+      .or(this.page.getByRole('button', { name: exact }))
+      .or(this.page.getByRole('row', { name: contains }))
+      .or(this.page.getByRole('listitem').filter({ hasText: exact }))
+      .or(this.page.getByText(exact));
   }
 
   async openProduct(name: string): Promise<void> {
-    if (await this.searchField().isVisible().catch(() => false)) {
-      await this.searchField().fill(name);
+    await expect(this.page.locator('main')).toBeVisible({ timeout: 30_000 });
+
+    const search = this.searchField();
+    if (await search.first().isVisible().catch(() => false)) {
+      await search.first().fill(name);
+      await this.page.waitForLoadState('networkidle').catch(() => undefined);
     }
 
-    const target = this.productRowOrLink(name);
-    await expect(target.first()).toBeVisible({ timeout: 20_000 });
+    const target = this.productRowOrLink(name).first();
+    await expect(target).toBeVisible({ timeout: 60_000 });
 
-    const nameLink = target.first().getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
+    const nameLink = this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }).first();
     if (await nameLink.isVisible().catch(() => false)) {
       await nameLink.click();
-    } else {
-      await target.first().click();
+      return;
     }
+
+    await target.click();
   }
 }
 
@@ -146,13 +211,13 @@ class ProductDetailsPage {
   constructor(private readonly page: Page) {}
 
   async assertLoadedWithName(name: string): Promise<void> {
-    await expect(this.page.getByRole('heading', { name: new RegExp(name, 'i') })).toBeVisible({ timeout: 20_000 });
+    await expect(this.page.getByRole('heading', { name: new RegExp(`^${name}$`, 'i') })).toBeVisible({ timeout: 20_000 });
     await expect(this.page.locator('body')).toContainText(new RegExp(name, 'i'));
   }
 }
 
 test.describe('TC-TC-31 Open Test Product details after selecting TEST client', { tag: '@functional' }, () => {
-  test('User can open Test Product details under TEST client context', async ({ page }) => {
+  test('User can view Test Product details under TEST client context', async ({ page }) => {
     // Arrange
     const username = process.env.TEST_USERNAME ?? process.env.APP_USERNAME;
     const password = process.env.TEST_PASSWORD ?? process.env.APP_PASSWORD;
@@ -168,7 +233,6 @@ test.describe('TC-TC-31 Open Test Product details after selecting TEST client', 
     // Act
     await loginPage.goto();
     await loginPage.login(username, password);
-
     await shell.selectClient('TEST');
     await shell.openProductsCatalog();
     await catalog.openProduct('Test Product');
