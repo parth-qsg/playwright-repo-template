@@ -174,39 +174,44 @@ class ProductsCatalogPage {
       .or(this.page.locator('input[type="search"], input[placeholder*="search" i]'));
   }
 
-  private productRowOrLink(name: string): Locator {
-    const exact = new RegExp(`^${name}$`, 'i');
-    const contains = new RegExp(name, 'i');
-
-    return this.page
-      .getByRole('link', { name: exact })
-      .or(this.page.getByRole('link', { name: contains }))
-      .or(this.page.getByRole('button', { name: exact }))
-      .or(this.page.getByRole('button', { name: contains }))
-      .or(this.page.getByRole('row', { name: contains }))
-      .or(this.page.getByRole('listitem').filter({ hasText: contains }))
-      .or(this.page.getByText(exact, { exact: true }))
-      .or(this.page.getByText(contains));
-  }
-
   async openProduct(name: string): Promise<void> {
     await this.page.waitForLoadState('domcontentloaded');
 
     const search = this.searchField();
     if (await search.first().isVisible().catch(() => false)) {
       await search.first().fill(name);
+      await this.page.keyboard.press('Enter').catch(() => undefined);
     }
 
-    const target = this.productRowOrLink(name).first();
-    await expect(target).toBeVisible({ timeout: 45_000 });
+    // Wait for results to render (table/list/grid) after navigation/search.
+    const resultsRegion = this.page
+      .getByRole('table')
+      .or(this.page.getByRole('grid'))
+      .or(this.page.getByRole('list'))
+      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'));
+    if (await resultsRegion.first().isVisible().catch(() => false)) {
+      await expect(resultsRegion.first()).toBeVisible({ timeout: 20_000 });
+    }
 
-    const nameLink = target.getByRole('link', { name: new RegExp(name, 'i') });
-    if (await nameLink.first().isVisible().catch(() => false)) {
-      await nameLink.first().click();
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(escaped, 'i');
+
+    const direct = this.page
+      .getByRole('link', { name: nameRe })
+      .or(this.page.getByRole('button', { name: nameRe }))
+      .or(this.page.getByRole('cell', { name: nameRe }))
+      .or(this.page.getByRole('row', { name: nameRe }))
+      .or(this.page.getByText(nameRe));
+
+    await expect(direct.first()).toBeVisible({ timeout: 45_000 });
+
+    const directLink = direct.first().getByRole('link', { name: nameRe });
+    if (await directLink.first().isVisible().catch(() => false)) {
+      await directLink.first().click();
       return;
     }
 
-    await target.click();
+    await direct.first().click();
   }
 }
 
