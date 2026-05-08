@@ -177,41 +177,46 @@ class ProductsCatalogPage {
   async openProduct(name: string): Promise<void> {
     await this.page.waitForLoadState('domcontentloaded');
 
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(escaped, 'i');
+
+    // Prefer searching/filtering when available to make the row appear deterministically.
     const search = this.searchField();
     if (await search.first().isVisible().catch(() => false)) {
       await search.first().fill(name);
       await this.page.keyboard.press('Enter').catch(() => undefined);
     }
 
-    // Wait for results to render (table/list/grid) after navigation/search.
+    // Wait for results container to exist (even if not ARIA-role'd).
     const resultsRegion = this.page
       .getByRole('table')
       .or(this.page.getByRole('grid'))
       .or(this.page.getByRole('list'))
-      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'));
-    if (await resultsRegion.first().isVisible().catch(() => false)) {
-      await expect(resultsRegion.first()).toBeVisible({ timeout: 20_000 });
-    }
+      .or(this.page.locator('[data-testid*="product" i], [class*="product" i], main'));
+    await expect(resultsRegion.first()).toBeVisible({ timeout: 30_000 });
 
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const nameRe = new RegExp(escaped, 'i');
-
-    const direct = this.page
-      .getByRole('link', { name: nameRe })
-      .or(this.page.getByRole('button', { name: nameRe }))
+    // Robustly locate the product row/item by text, then click the most semantic target within it.
+    const rowOrItem = this.page
+      .getByRole('row', { name: nameRe })
+      .or(this.page.getByRole('listitem', { name: nameRe }))
       .or(this.page.getByRole('cell', { name: nameRe }))
-      .or(this.page.getByRole('row', { name: nameRe }))
-      .or(this.page.getByText(nameRe));
+      .or(this.page.getByText(nameRe, { exact: false }));
 
-    await expect(direct.first()).toBeVisible({ timeout: 45_000 });
+    await expect(rowOrItem.first()).toBeVisible({ timeout: 45_000 });
 
-    const directLink = direct.first().getByRole('link', { name: nameRe });
-    if (await directLink.first().isVisible().catch(() => false)) {
-      await directLink.first().click();
+    const container = rowOrItem.first();
+    const clickable = container
+      .getByRole('link', { name: nameRe })
+      .or(container.getByRole('button', { name: nameRe }))
+      .or(container.locator('a,button'));
+
+    if (await clickable.first().isVisible().catch(() => false)) {
+      await clickable.first().click();
       return;
     }
 
-    await direct.first().click();
+    // Fallback: click the container itself.
+    await container.click();
   }
 }
 
@@ -241,7 +246,6 @@ test.describe('QM-TC-1 Open Test Product details after selecting client TEST', {
     // Act
     await loginPage.goto();
     await loginPage.login(username, password);
-
     await shell.selectClient('TEST');
     await shell.openProductDetailsList();
     await catalog.openProduct('Test Product');
