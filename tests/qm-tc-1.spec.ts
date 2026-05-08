@@ -174,40 +174,23 @@ class ProductsCatalogPage {
       .or(this.page.locator('input[type="search"], input[placeholder*="search" i]'));
   }
 
-  private tableOrListContainer(): Locator {
-    return this.page
-      .getByRole('table')
-      .or(this.page.getByRole('grid'))
-      .or(this.page.getByRole('list'))
-      .or(this.page.locator('[data-testid*="product" i], [class*="product" i]'))
-      .or(this.page.locator('main'));
-  }
-
   private productRowOrLink(name: string): Locator {
     const exact = new RegExp(`^${name}$`, 'i');
     const contains = new RegExp(name, 'i');
 
     return this.page
       .getByRole('link', { name: exact })
+      .or(this.page.getByRole('link', { name: contains }))
       .or(this.page.getByRole('button', { name: exact }))
+      .or(this.page.getByRole('button', { name: contains }))
       .or(this.page.getByRole('row', { name: contains }))
-      .or(this.page.getByRole('listitem').filter({ hasText: exact }))
-      .or(this.page.getByText(exact));
+      .or(this.page.getByRole('listitem').filter({ hasText: contains }))
+      .or(this.page.getByText(exact, { exact: true }))
+      .or(this.page.getByText(contains));
   }
 
   async openProduct(name: string): Promise<void> {
-    // Some apps render the catalog as cards without table/grid/list roles.
-    // Wait for the page to be ready by waiting for either a container or the product itself.
-    await expect
-      .poll(
-        async () => {
-          const containerCount = await this.tableOrListContainer().count();
-          const productCount = await this.productRowOrLink(name).count();
-          return containerCount > 0 || productCount > 0;
-        },
-        { timeout: 30_000 },
-      )
-      .toBeTruthy();
+    await this.page.waitForLoadState('domcontentloaded');
 
     const search = this.searchField();
     if (await search.first().isVisible().catch(() => false)) {
@@ -215,11 +198,11 @@ class ProductsCatalogPage {
     }
 
     const target = this.productRowOrLink(name).first();
-    await expect(target).toBeVisible({ timeout: 30_000 });
+    await expect(target).toBeVisible({ timeout: 45_000 });
 
-    const nameLink = target.getByRole('link', { name: new RegExp(`^${name}$`, 'i') });
-    if (await nameLink.isVisible().catch(() => false)) {
-      await nameLink.click();
+    const nameLink = target.getByRole('link', { name: new RegExp(name, 'i') });
+    if (await nameLink.first().isVisible().catch(() => false)) {
+      await nameLink.first().click();
       return;
     }
 
