@@ -60,10 +60,6 @@ class DashboardPage {
     return this.page.getByRole('heading', { name: /dashboard/i });
   }
 
-  private mainRegion(): Locator {
-    return this.page.getByRole('main').or(this.page.locator('main'));
-  }
-
   private appShell(): Locator {
     return this.page
       .getByRole('navigation')
@@ -89,7 +85,6 @@ class DashboardPage {
   }
 
   async assertOnDashboard(): Promise<void> {
-    // Deterministic business outcome: authenticated UI is visible.
     if (await this.dashboardHeading().first().isVisible().catch(() => false)) {
       await expect(this.dashboardHeading().first()).toBeVisible();
       return;
@@ -101,7 +96,7 @@ class DashboardPage {
 }
 
 test.describe('QM-TC-2 Successful login with valid credentials', { tag: '@new' }, () => {
-  test('User can log in and access the dashboard', async ({ page }) => {
+  test('User is authenticated and presented with the dashboard', async ({ page }) => {
     // Arrange
     const username = process.env.TEST_USERNAME ?? process.env.APP_USERNAME;
     const password = process.env.TEST_PASSWORD ?? process.env.APP_PASSWORD;
