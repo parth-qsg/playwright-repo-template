@@ -29,7 +29,6 @@ class LoginPage {
   }
 
   private authError(): Locator {
-    // Common patterns: inline alert, toast, helper text.
     return this.page
       .getByRole('alert')
       .or(this.page.getByText(/invalid|incorrect|authentication failed|unauthorized|wrong|error/i))
@@ -39,6 +38,7 @@ class LoginPage {
   async goto(): Promise<void> {
     const baseURL = test.info().project.use?.baseURL;
     if (!baseURL) throw new Error('baseURL is not configured in Playwright project config.');
+
     await this.page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
   }
@@ -47,7 +47,12 @@ class LoginPage {
     await this.usernameField().first().fill(username);
 
     // Support both single-step and two-step login forms.
-    if (await this.passwordField().first().isVisible().catch(() => false)) {
+    const passwordVisible = await this.passwordField()
+      .first()
+      .isVisible()
+      .catch(() => false);
+
+    if (passwordVisible) {
       await this.passwordField().first().fill(password);
       await this.signInButton().first().click();
       return;
@@ -60,28 +65,24 @@ class LoginPage {
   }
 
   async assertLoginNotSuccessful(): Promise<void> {
-    // Remain on login page: username field still visible.
     await expect(this.usernameField().first()).toBeVisible({ timeout: 20_000 });
-
-    // Error message displayed.
     await expect(this.authError().first()).toBeVisible({ timeout: 20_000 });
-
-    // Ensure we did not land on an authenticated shell (heuristic).
     await expect(this.page.getByRole('link', { name: /logout|sign out/i })).toHaveCount(0);
   }
 }
 
 test.describe('QM-TC-3 Fail login with invalid credentials', { tag: '@new' }, () => {
-  test('Invalid credentials are rejected; user remains on login page with an error message', async ({ page }) => {
+  test('Invalid credentials are rejected; user remains on the login page with an error message', async ({ page }) => {
     // Arrange
-    const validUsername = process.env.TEST_USERNAME ?? process.env.APP_USERNAME;
-    if (!validUsername) {
-      throw new Error('Missing username env var. Set TEST_USERNAME (or APP_USERNAME).');
+    const seedUsername = process.env.TEST_USERNAME ?? process.env.APP_USERNAME;
+    const seedPassword = process.env.TEST_PASSWORD ?? process.env.APP_PASSWORD;
+    if (!seedUsername || !seedPassword) {
+      throw new Error('Missing credential env vars. Set TEST_USERNAME/TEST_PASSWORD (or APP_USERNAME/APP_PASSWORD).');
     }
 
     const loginPage = new LoginPage(page);
-    const invalidUsername = `${validUsername}.invalid`;
-    const invalidPassword = `invalid-${Date.now()}`;
+    const invalidUsername = `${seedUsername}.invalid`;
+    const invalidPassword = `${seedPassword}-invalid`;
 
     // Act
     await loginPage.goto();
