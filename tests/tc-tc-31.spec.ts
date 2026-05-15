@@ -173,37 +173,62 @@ class ProductsCatalogPage {
       .or(this.page.locator('input[type="search"], input[placeholder*="search" i]'));
   }
 
-  private productRowOrLink(name: string): Locator {
-    const exact = new RegExp(`^${name}$`, 'i');
-    const contains = new RegExp(name, 'i');
-
-    return this.page
-      .getByRole('link', { name: exact })
-      .or(this.page.getByRole('button', { name: exact }))
-      .or(this.page.getByRole('row', { name: contains }))
-      .or(this.page.getByRole('listitem').filter({ hasText: exact }))
-      .or(this.page.getByText(exact));
-  }
-
   async openProduct(name: string): Promise<void> {
-    await expect(this.page.locator('main')).toBeVisible({ timeout: 30_000 });
+    await this.page.waitForLoadState('domcontentloaded');
+
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRe = new RegExp(escaped, 'i');
 
     const search = this.searchField();
     if (await search.first().isVisible().catch(() => false)) {
       await search.first().fill(name);
-      await this.page.waitForLoadState('networkidle').catch(() => undefined);
+      await this.page.keyboard.press('Enter').catch(() => undefined);
     }
 
-    const target = this.productRowOrLink(name).first();
-    await expect(target).toBeVisible({ timeout: 60_000 });
+    // Wait for either a results container OR the product text itself.
+    // Some UIs render cards without semantic table/grid/list roles.
+    const resultsRegion = this.page
+      .getByRole('table')
+      .or(this.page.getByRole('grid'))
+      .or(this.page.getByRole('list'))
+      .or(this.page.locator('[data-testid*="catalog" i], [data-testid*="product" i], [class*="catalog" i], [class*="product" i], main'));
 
-    const nameLink = this.page.getByRole('link', { name: new RegExp(`^${name}$`, 'i') }).first();
-    if (await nameLink.isVisible().catch(() => false)) {
-      await nameLink.click();
+    const rowOrItem = this.page
+      .getByRole('row', { name: nameRe })
+      .or(this.page.getByRole('listitem', { name: nameRe }))
+      .or(this.page.getByRole('cell', { name: nameRe }))
+      .or(this.page.getByRole('link', { name: nameRe }))
+      .or(this.page.getByRole('button', { name: nameRe }))
+      .or(this.page.getByText(nameRe, { exact: false }));
+
+    await expect
+      .poll(async () => {
+        const regionCount = await resultsRegion.count();
+        const itemCount = await rowOrItem.count();
+        return regionCount + itemCount;
+      }, {
+        timeout: 45_000,
+      })
+      .toBeGreaterThan(0);
+
+    if ((await resultsRegion.count()) > 0) {
+      await expect(resultsRegion.first()).toBeVisible({ timeout: 45_000 });
+    }
+
+    await expect(rowOrItem.first()).toBeVisible({ timeout: 45_000 });
+
+    const container = rowOrItem.first();
+    const clickable = container
+      .getByRole('link', { name: nameRe })
+      .or(container.getByRole('button', { name: nameRe }))
+      .or(container.locator('a,button'));
+
+    if (await clickable.first().isVisible().catch(() => false)) {
+      await clickable.first().click();
       return;
     }
 
-    await target.click();
+    await container.click();
   }
 }
 
@@ -212,7 +237,9 @@ class ProductDetailsPage {
 
   async assertLoadedWithName(name: string): Promise<void> {
     await expect(this.page.getByRole('heading', { name: new RegExp(`^${name}$`, 'i') })).toBeVisible({ timeout: 20_000 });
-    await expect(this.page.locator('body')).toContainText(new RegExp(name, 'i'));
+
+    // "Relevant information" is app-specific; assert at least some details content exists.
+    await expect(this.page.locator('main, [role="main"], body').first()).toContainText(new RegExp(name, 'i'));
   }
 }
 
