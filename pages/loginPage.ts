@@ -4,11 +4,11 @@ export class LoginPage {
   constructor(private readonly page: Page) {}
 
   private get emailInput(): Locator {
-    return this.page.getByRole("textbox", { name: "Email" });
+    return this.page.locator("#email");
   }
 
   private get passwordInput(): Locator {
-    return this.page.getByRole("textbox", { name: "Password" });
+    return this.page.locator("#password");
   }
 
   private get signInButton(): Locator {
@@ -68,7 +68,7 @@ export class LoginPage {
   }
 
   async assertLoggedIn(): Promise<void> {
-    await expect(this.page).not.toHaveURL("https://demo.qmagic.ai/login");
+    await expect(this.page).not.toHaveURL("/login");
     await expect(this.signInButton).toHaveCount(0);
   }
 }
