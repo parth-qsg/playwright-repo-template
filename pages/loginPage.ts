@@ -71,4 +71,16 @@ export class LoginPage {
     await expect(this.page).not.toHaveURL("/login");
     await expect(this.signInButton).toHaveCount(0);
   }
+
+  async assertLoginPageVisible(): Promise<void> {
+    await expect(this.page).toHaveURL("/login");
+    await expect(this.emailInput).toBeVisible();
+    await expect(this.passwordInput).toBeVisible();
+    await expect(this.signInButton).toBeVisible();
+  }
+
+  async assertAuthenticationAdvanced(): Promise<void> {
+    await expect(this.page).not.toHaveURL("/login");
+    await expect(this.selectClientDialog).toHaveCount(0);
+  }
 }

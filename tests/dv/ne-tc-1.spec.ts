@@ -17,12 +17,15 @@ test.describe(
       // Arrange
       await loginPage.goto();
 
+      // Assert
+      await loginPage.assertLoginPageVisible();
+
       // Act
       await loginPage.login();
       await loginPage.selectClientIfPrompted({ clientName: "QMagic" });
 
       // Assert
-      await loginPage.assertLoggedIn();
+      await loginPage.assertAuthenticationAdvanced();
       await appShellPage.assertAuthenticatedShellVisible();
 
       // Act
