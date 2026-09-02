@@ -3,12 +3,20 @@ import { expect, type Locator, type Page } from "@playwright/test";
 export class LoginPage {
   constructor(private readonly page: Page) {}
 
+  private get emailGroup(): Locator {
+    return this.page.getByRole("group", { name: "Email" });
+  }
+
   private get emailInput(): Locator {
-    return this.page.getByRole("textbox", { name: "Email" });
+    return this.emailGroup.getByRole("textbox");
+  }
+
+  private get passwordGroup(): Locator {
+    return this.page.getByRole("group", { name: "Password" });
   }
 
   private get passwordInput(): Locator {
-    return this.page.getByRole("textbox", { name: "Password" });
+    return this.passwordGroup.getByRole("textbox");
   }
 
   private get signInButton(): Locator {
